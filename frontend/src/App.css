@@ -17,6 +17,63 @@
   stroke-width: 3 !important;
 }
 
+/* Ensure edges are always visible and properly rendered */
+.react-flow__edge-path {
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.react-flow__edge {
+  pointer-events: all;
+  z-index: 1 !important; /* Edges below nodes */
+}
+
+/* Ensure nodes are above edges */
+.react-flow__node {
+  z-index: 10 !important; /* Nodes above edges */
+}
+
+.react-flow__node.selected {
+  z-index: 100 !important; /* Selected nodes on top */
+}
+
+/* Make animated edges more visible */
+.react-flow__edge.animated path {
+  stroke-dasharray: 5;
+  animation: dashdraw 0.5s linear infinite;
+}
+
+@keyframes dashdraw {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Edge labels */
+.react-flow__edge-text {
+  font-size: 11px;
+  font-weight: bold;
+}
+
+/* Connection line while dragging */
+.react-flow__connectionline {
+  stroke: #3b82f6;
+  stroke-width: 2;
+  stroke-dasharray: 5, 5;
+}
+
 /* Person Node Hover Effect */
 .person-node-2d:hover {
   transform: scale(1.08) !important;

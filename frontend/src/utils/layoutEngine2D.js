@@ -189,6 +189,20 @@ export const calculateTreeLayout2D = (persons) => {
         }
       });
     }
+
+    // Sibling edges
+    if (person.siblings && person.siblings.length > 0) {
+      person.siblings.forEach(sibling => {
+        // Only add edge once (from lower ID to higher ID to avoid duplicates)
+        if (person.id < sibling.id) {
+          edges.push({
+            source: person.id,
+            target: sibling.id,
+            type: 'sibling',
+          });
+        }
+      });
+    }
   });
 
   // Apply collision detection and spacing adjustments

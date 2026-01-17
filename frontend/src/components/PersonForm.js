@@ -8,7 +8,8 @@ function PersonForm({ person, persons, onSubmit, onClose }) {
     photo: '',
     parents: [],
     spouse: [],
-    children: []
+    children: [],
+    siblings: []
   });
   const [photoPreview, setPhotoPreview] = useState(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -22,7 +23,8 @@ function PersonForm({ person, persons, onSubmit, onClose }) {
         photo: person.photo || '',
         parents: person.parents?.map(p => p.id || p) || [],
         spouse: person.spouses?.map(s => s.id || s) || [],
-        children: person.children?.map(c => c.id || c) || []
+        children: person.children?.map(c => c.id || c) || [],
+        siblings: person.siblings?.map(s => s.id || s) || []
       });
       setPhotoPreview(person.photo || null);
     }
@@ -35,7 +37,92 @@ function PersonForm({ person, persons, onSubmit, onClose }) {
 
   const handleMultiSelect = (e, field) => {
     const options = Array.from(e.target.selectedOptions, option => option.value);
-    setFormData(prev => ({ ...prev, [field]: options }));
+    
+    // Special handling for parents selection: auto-select both spouses and siblings
+    if (field === 'parents') {
+      const selectedParentIds = new Set(options);
+      const siblingIds = new Set();
+      
+      // Find spouses of selected parents and auto-add them
+      options.forEach(parentId => {
+        const parent = persons.find(p => p.id === parentId);
+        if (parent && parent.spouses) {
+          parent.spouses.forEach(spouse => {
+            // Add spouse to selection if they're in the available list
+            if (availablePersons.some(p => p.id === spouse.id)) {
+              selectedParentIds.add(spouse.id);
+            }
+          });
+        }
+      });
+      
+      // Auto-add all children of selected parents as siblings
+      Array.from(selectedParentIds).forEach(parentId => {
+        const parent = persons.find(p => p.id === parentId);
+        if (parent && parent.children) {
+          parent.children.forEach(child => {
+            // Add child as sibling if they're not the current person being edited
+            const childId = child.id || child;
+            if (person && childId === person.id) {
+              // Skip current person
+              return;
+            }
+            // Add to siblings
+            siblingIds.add(childId);
+          });
+        }
+      });
+      
+      setFormData(prev => ({ 
+        ...prev, 
+        parents: Array.from(selectedParentIds),
+        siblings: Array.from(siblingIds)
+      }));
+    } 
+    // Special handling for spouse selection: auto-add all children from both spouses
+    else if (field === 'spouse') {
+      const childrenIds = new Set([...formData.children]); // Keep existing children
+      
+      // Add children from each selected spouse
+      options.forEach(spouseId => {
+        const spouse = persons.find(p => p.id === spouseId);
+        if (spouse && spouse.children) {
+          spouse.children.forEach(child => {
+            const childId = child.id || child;
+            childrenIds.add(childId);
+          });
+        }
+      });
+      
+      setFormData(prev => ({ 
+        ...prev, 
+        spouse: options,
+        children: Array.from(childrenIds)
+      }));
+    }
+    // Special handling for siblings selection: auto-add all siblings of selected siblings
+    else if (field === 'siblings') {
+      const siblingIds = new Set(options);
+      
+      // For each selected sibling, find their siblings and add them too
+      options.forEach(siblingId => {
+        const sibling = persons.find(p => p.id === siblingId);
+        if (sibling && sibling.siblings) {
+          sibling.siblings.forEach(otherSibling => {
+            const otherSiblingId = otherSibling.id || otherSibling;
+            // Don't add the current person as their own sibling
+            if (!person || otherSiblingId !== person.id) {
+              siblingIds.add(otherSiblingId);
+            }
+          });
+        }
+      });
+      
+      setFormData(prev => ({ ...prev, siblings: Array.from(siblingIds) }));
+    }
+    else {
+      setFormData(prev => ({ ...prev, [field]: options }));
+    }
   };
 
   const handlePhotoChange = (e) => {
@@ -84,7 +171,17 @@ function PersonForm({ person, persons, onSubmit, onClose }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSubmit(formData);
+    
+    // Clean up form data before submitting
+    const cleanedData = {
+      ...formData,
+      // Convert empty date string to null
+      dob: formData.dob && formData.dob.trim() !== '' ? formData.dob : null,
+      // Convert empty photo string to null
+      photo: formData.photo && formData.photo.trim() !== '' ? formData.photo : null
+    };
+    
+    onSubmit(cleanedData);
   };
 
   // Filter persons for selection (exclude self when editing)
@@ -247,13 +344,18 @@ function PersonForm({ person, persons, onSubmit, onClose }) {
               className="w-full px-4 py-2 bg-dark-bg text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 h-32"
             >
               {availablePersons.map(p => (
-                <option key={p._id} value={p._id}>
+                <option key={p.id} value={p.id}>
                   {p.name} (Gen {p.generation})
                 </option>
               ))}
             </select>
             <p className="text-xs text-gray-400 mt-1">
               Selected: {formData.parents.length} parent(s)
+              {formData.parents.length > 0 && formData.siblings.length > 0 && (
+                <span className="ml-2 text-green-400">
+                  ✨ Auto-added {formData.siblings.length} sibling(s)
+                </span>
+              )}
             </p>
           </div>
 
@@ -269,20 +371,25 @@ function PersonForm({ person, persons, onSubmit, onClose }) {
               className="w-full px-4 py-2 bg-dark-bg text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 h-32"
             >
               {availablePersons.map(p => (
-                <option key={p._id} value={p._id}>
+                <option key={p.id} value={p.id}>
                   {p.name} (Gen {p.generation})
                 </option>
               ))}
             </select>
             <p className="text-xs text-gray-400 mt-1">
               Selected: {formData.spouse.length} spouse(s)
+              {formData.spouse.length > 0 && formData.children.length > 0 && (
+                <span className="ml-2 text-green-400">
+                  ✨ Auto-added {formData.children.length} child(ren)
+                </span>
+              )}
             </p>
           </div>
 
           {/* Children */}
           <div>
             <label className="block text-sm font-medium mb-2">
-              Children (Hold Ctrl/Cmd to select multiple)
+              Children (Auto-filled from spouse, or select manually)
             </label>
             <select
               multiple
@@ -291,13 +398,45 @@ function PersonForm({ person, persons, onSubmit, onClose }) {
               className="w-full px-4 py-2 bg-dark-bg text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 h-32"
             >
               {availablePersons.map(p => (
-                <option key={p._id} value={p._id}>
+                <option key={p.id} value={p.id}>
                   {p.name} (Gen {p.generation})
                 </option>
               ))}
             </select>
             <p className="text-xs text-gray-400 mt-1">
               Selected: {formData.children.length} child(ren)
+              {formData.spouse.length > 0 && formData.children.length > 0 && (
+                <span className="ml-2 text-blue-400">
+                  ℹ️ Includes children from spouse(s)
+                </span>
+              )}
+            </p>
+          </div>
+
+          {/* Siblings */}
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              Siblings (Auto-filled from parents, or select manually)
+            </label>
+            <select
+              multiple
+              value={formData.siblings}
+              onChange={(e) => handleMultiSelect(e, 'siblings')}
+              className="w-full px-4 py-2 bg-dark-bg text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 h-32"
+            >
+              {availablePersons.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name} (Gen {p.generation})
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400 mt-1">
+              Selected: {formData.siblings.length} sibling(s)
+              {formData.parents.length > 0 && formData.siblings.length > 0 && (
+                <span className="ml-2 text-blue-400">
+                  ℹ️ Auto-filled based on parent's children
+                </span>
+              )}
             </p>
           </div>
 

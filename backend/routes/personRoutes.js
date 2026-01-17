@@ -3,6 +3,122 @@ const router = express.Router();
 const { Person, PersonRelationship } = require('../models/Person');
 const { Op } = require('sequelize');
 
+// Helper function to create complete sibling relationships (all siblings linked to each other)
+async function createCompleteSiblingGroup(personId, siblingIds) {
+  // Get the person
+  const person = await Person.findByPk(personId);
+  if (!person) return;
+  
+  // Collect all siblings including the person and their new siblings
+  const allSiblingIds = new Set([personId, ...siblingIds]);
+  
+  // Get existing siblings of the person
+  const existingSiblingRels = await PersonRelationship.findAll({
+    where: {
+      [Op.or]: [
+        { parentId: personId, type: 'sibling' },
+        { childId: personId, type: 'sibling' }
+      ]
+    }
+  });
+  
+  // Add existing siblings to the set
+  existingSiblingRels.forEach(rel => {
+    const siblingId = rel.parentId === personId ? rel.childId : rel.parentId;
+    allSiblingIds.add(siblingId);
+  });
+  
+  // Get existing siblings of each new sibling
+  for (const siblingId of siblingIds) {
+    const siblingRels = await PersonRelationship.findAll({
+      where: {
+        [Op.or]: [
+          { parentId: siblingId, type: 'sibling' },
+          { childId: siblingId, type: 'sibling' }
+        ]
+      }
+    });
+    
+    siblingRels.forEach(rel => {
+      const otherSiblingId = rel.parentId === siblingId ? rel.childId : rel.parentId;
+      allSiblingIds.add(otherSiblingId);
+    });
+  }
+  
+  // Convert to array
+  const allSiblings = Array.from(allSiblingIds);
+  
+  // Create bidirectional relationships between all siblings
+  for (let i = 0; i < allSiblings.length; i++) {
+    for (let j = i + 1; j < allSiblings.length; j++) {
+      const sibling1 = allSiblings[i];
+      const sibling2 = allSiblings[j];
+      
+      // Create relationship in both directions
+      await PersonRelationship.findOrCreate({
+        where: {
+          parentId: sibling1,
+          childId: sibling2,
+          type: 'sibling'
+        }
+      });
+      await PersonRelationship.findOrCreate({
+        where: {
+          parentId: sibling2,
+          childId: sibling1,
+          type: 'sibling'
+        }
+      });
+    }
+  }
+  
+  console.log(`Created complete sibling group of ${allSiblings.length} siblings`);
+}
+
+// Helper function to recalculate all generations from root ancestors
+async function recalculateAllGenerations() {
+  // Get all persons
+  const allPersons = await Person.findAll();
+  
+  // Find root ancestors (persons with no parents)
+  const rootAncestors = [];
+  for (const person of allPersons) {
+    const parentRelations = await PersonRelationship.findAll({
+      where: { childId: person.id, type: 'parent-child' }
+    });
+    if (parentRelations.length === 0) {
+      rootAncestors.push(person);
+    }
+  }
+  
+  // Set all root ancestors to generation 0
+  for (const root of rootAncestors) {
+    root.generation = 0;
+    await root.save();
+  }
+  
+  // Now recalculate for all persons (multiple passes to ensure all are calculated)
+  let updated = true;
+  let passes = 0;
+  const maxPasses = 10; // Prevent infinite loops
+  
+  while (updated && passes < maxPasses) {
+    updated = false;
+    passes++;
+    
+    for (const person of allPersons) {
+      const oldGen = person.generation;
+      await person.calculateGeneration();
+      if (person.generation !== oldGen) {
+        await person.save();
+        updated = true;
+      }
+    }
+  }
+  
+  console.log(`Generation recalculation completed in ${passes} passes`);
+}
+
 // GET all persons with populated relationships
 router.get('/', async (req, res) => {
   try {
@@ -38,6 +154,41 @@ router.get('/', async (req, res) => {
       ],
       order: [['generation', 'ASC']]
     });
+    
+    // Manually fetch siblings for each person (deduplicate)
+    for (const person of persons) {
+      const siblings = await PersonRelationship.findAll({
+        where: {
+          [Op.or]: [
+            { parentId: person.id, type: 'sibling' },
+            { childId: person.id, type: 'sibling' }
+          ]
+        },
+        include: [
+          {
+            model: Person,
+            as: 'Parent',
+            attributes: ['id', 'name', 'gender']
+          },
+          {
+            model: Person,
+            as: 'Child',
+            attributes: ['id', 'name', 'gender']
+          }
+        ]
+      });
+      
+      // Deduplicate siblings by ID
+      const siblingMap = new Map();
+      siblings.forEach(rel => {
+        const sibling = rel.parentId === person.id ? rel.Child : rel.Parent;
+        if (sibling && !siblingMap.has(sibling.id)) {
+          siblingMap.set(sibling.id, sibling);
+        }
+      });
+      person.dataValues.siblings = Array.from(siblingMap.values());
+    }
+    
     res.json(persons);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -80,6 +231,38 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ message: 'Person not found' });
     }
     
+    // Manually fetch siblings (deduplicate)
+    const siblings = await PersonRelationship.findAll({
+      where: {
+        [Op.or]: [
+          { parentId: person.id, type: 'sibling' },
+          { childId: person.id, type: 'sibling' }
+        ]
+      },
+      include: [
+        {
+          model: Person,
+          as: 'Parent',
+          attributes: ['id', 'name', 'gender']
+        },
+        {
+          model: Person,
+          as: 'Child',
+          attributes: ['id', 'name', 'gender']
+        }
+      ]
+    });
+    
+    // Deduplicate siblings by ID
+    const siblingMap = new Map();
+    siblings.forEach(rel => {
+      const sibling = rel.parentId === person.id ? rel.Child : rel.Parent;
+      if (sibling && !siblingMap.has(sibling.id)) {
+        siblingMap.set(sibling.id, sibling);
+      }
+    });
+    person.dataValues.siblings = Array.from(siblingMap.values());
+    
     res.json(person);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -94,18 +277,16 @@ router.post('/', async (req, res) => {
       gender: req.body.gender,
       dob: req.body.dob || null,
       photo: req.body.photo || null,
-      generation: req.body.generation || 0
+      generation: 0 // Will be calculated based on relationships and birth year
     });
 
     const parents = req.body.parents || [];
     const spouses = req.body.spouse || [];
     const children = req.body.children || [];
+    const siblings = req.body.siblings || [];
 
     // Add parent-child relationships
     if (parents.length > 0) {
-      await person.calculateGeneration();
-      await person.save();
-      
       for (const parentId of parents) {
         await PersonRelationship.create({
           parentId: parentId,
@@ -114,17 +295,45 @@ router.post('/', async (req, res) => {
         });
       }
     }
+    
+    // Recalculate generations for entire tree to ensure consistency
+    await recalculateAllGenerations();
 
     // Add spouse relationships (bidirectional)
     if (spouses.length > 0) {
       for (const spouseId of spouses) {
-        await PersonRelationship.findOrCreate({
-          where: {
-            parentId: person.id,
-            childId: spouseId,
-            type: 'spouse'
+        const spouse = await Person.findByPk(spouseId);
+        if (spouse) {
+          // Ensure both spouses are in the same generation
+          // Use the higher generation value to avoid breaking parent-child relationships
+          const targetGeneration = Math.max(person.generation, spouse.generation);
+          
+          if (person.generation !== targetGeneration) {
+            person.generation = targetGeneration;
+            await person.save();
           }
-        });
+          
+          if (spouse.generation !== targetGeneration) {
+            spouse.generation = targetGeneration;
+            await spouse.save();
+          }
+          
+          // Create spouse relationship in both directions
+          await PersonRelationship.findOrCreate({
+            where: {
+              parentId: person.id,
+              childId: spouseId,
+              type: 'spouse'
+            }
+          });
+          await PersonRelationship.findOrCreate({
+            where: {
+              parentId: spouseId,
+              childId: person.id,
+              type: 'spouse'
+            }
+          });
+        }
       }
     }
 
@@ -136,7 +345,23 @@ router.post('/', async (req, res) => {
           childId: childId,
           type: 'parent-child'
         });
+        
+        // Update child's generation
+        const child = await Person.findByPk(childId);
+        if (child) {
+          await child.calculateGeneration();
+          await child.save();
+        }
       }
+      
+      // Recalculate parent's generation if needed
+      await person.calculateGeneration();
+      await person.save();
+    }
+
+    // Add sibling relationships (complete sibling group)
+    if (siblings.length > 0) {
+      await createCompleteSiblingGroup(person.id, siblings);
     }
 
     const populatedPerson = await Person.findByPk(person.id, {
@@ -146,6 +371,38 @@ router.post('/', async (req, res) => {
         { model: Person, as: 'children', through: { attributes: [] } }
       ]
     });
+
+    // Manually fetch siblings (deduplicate)
+    const siblingRels = await PersonRelationship.findAll({
+      where: {
+        [Op.or]: [
+          { parentId: person.id, type: 'sibling' },
+          { childId: person.id, type: 'sibling' }
+        ]
+      },
+      include: [
+        {
+          model: Person,
+          as: 'Parent',
+          attributes: ['id', 'name', 'gender']
+        },
+        {
+          model: Person,
+          as: 'Child',
+          attributes: ['id', 'name', 'gender']
+        }
+      ]
+    });
+    
+    // Deduplicate siblings by ID
+    const siblingMap = new Map();
+    siblingRels.forEach(rel => {
+      const sibling = rel.parentId === person.id ? rel.Child : rel.Parent;
+      if (sibling && !siblingMap.has(sibling.id)) {
+        siblingMap.set(sibling.id, sibling);
+      }
+    });
+    populatedPerson.dataValues.siblings = Array.from(siblingMap.values());
 
     res.status(201).json(populatedPerson);
   } catch (error) {
@@ -165,8 +422,11 @@ router.put('/:id', async (req, res) => {
     // Update basic fields
     if (req.body.name !== undefined) person.name = req.body.name;
     if (req.body.gender !== undefined) person.gender = req.body.gender;
-    if (req.body.dob !== undefined) person.dob = req.body.dob;
-    if (req.body.photo !== undefined) person.photo = req.body.photo;
+    if (req.body.dob !== undefined) person.dob = req.body.dob || null;
+    if (req.body.photo !== undefined) person.photo = req.body.photo || null;
+
+    // Save basic fields first
+    await person.save();
 
     // Update relationships if provided
     if (req.body.parents !== undefined) {
@@ -202,15 +462,39 @@ router.put('/:id', async (req, res) => {
         }
       });
       
-      // Add new spouse relationships
+      // Add new spouse relationships (bidirectional)
       for (const spouseId of req.body.spouse) {
-        await PersonRelationship.findOrCreate({
-          where: {
-            parentId: person.id,
-            childId: spouseId,
-            type: 'spouse'
+        const spouse = await Person.findByPk(spouseId);
+        if (spouse) {
+          // Ensure both spouses are in the same generation
+          // Use the higher generation value to avoid breaking parent-child relationships
+          const targetGeneration = Math.max(person.generation, spouse.generation);
+          
+          if (person.generation !== targetGeneration) {
+            person.generation = targetGeneration;
+            await person.save();
           }
-        });
+          
+          if (spouse.generation !== targetGeneration) {
+            spouse.generation = targetGeneration;
+            await spouse.save();
+          }
+          
+          await PersonRelationship.findOrCreate({
+            where: {
+              parentId: person.id,
+              childId: spouseId,
+              type: 'spouse'
+            }
+          });
+          await PersonRelationship.findOrCreate({
+            where: {
+              parentId: spouseId,
+              childId: person.id,
+              type: 'spouse'
+            }
+          });
+        }
       }
     }
 
@@ -230,10 +514,35 @@ router.put('/:id', async (req, res) => {
           childId: childId,
           type: 'parent-child'
         });
+        
+        // Update child's generation
+        const child = await Person.findByPk(childId);
+        if (child) {
+          await child.calculateGeneration();
+          await child.save();
+        }
       }
     }
 
-    await person.save();
+    if (req.body.siblings !== undefined) {
+      // Remove old sibling relationships for this person
+      await PersonRelationship.destroy({
+        where: {
+          [Op.or]: [
+            { parentId: person.id, type: 'sibling' },
+            { childId: person.id, type: 'sibling' }
+          ]
+        }
+      });
+      
+      // Add new sibling relationships (complete sibling group)
+      if (req.body.siblings.length > 0) {
+        await createCompleteSiblingGroup(person.id, req.body.siblings);
+      }
+    }
+
+    // Recalculate generations for entire tree to ensure consistency
+    await recalculateAllGenerations();
 
     const updatedPerson = await Person.findByPk(person.id, {
       include: [
@@ -242,6 +551,38 @@ router.put('/:id', async (req, res) => {
         { model: Person, as: 'children', through: { attributes: [] } }
       ]
     });
+
+    // Manually fetch siblings (deduplicate)
+    const siblingRels = await PersonRelationship.findAll({
+      where: {
+        [Op.or]: [
+          { parentId: person.id, type: 'sibling' },
+          { childId: person.id, type: 'sibling' }
+        ]
+      },
+      include: [
+        {
+          model: Person,
+          as: 'Parent',
+          attributes: ['id', 'name', 'gender']
+        },
+        {
+          model: Person,
+          as: 'Child',
+          attributes: ['id', 'name', 'gender']
+        }
+      ]
+    });
+    
+    // Deduplicate siblings by ID
+    const siblingMap = new Map();
+    siblingRels.forEach(rel => {
+      const sibling = rel.parentId === person.id ? rel.Child : rel.Parent;
+      if (sibling && !siblingMap.has(sibling.id)) {
+        siblingMap.set(sibling.id, sibling);
+      }
+    });
+    updatedPerson.dataValues.siblings = Array.from(siblingMap.values());
 
     res.json(updatedPerson);
   } catch (error) {

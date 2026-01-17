@@ -2,11 +2,27 @@ import React, { memo, useState } from 'react';
 import { Handle, Position } from 'reactflow';
 
 const PersonNode2D = memo(({ data }) => {
-  const { person, isSelected, onSelect } = data;
+  const { person, isSelected, onSelect, isHighlighted, relationshipType } = data;
   const [isHovered, setIsHovered] = useState(false);
 
   const getBackgroundColor = () => {
     if (isSelected) return 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 50%, #ea580c 100%)';
+    
+    // Highlight connected cards with relationship-specific colors
+    if (isHighlighted && relationshipType) {
+      switch (relationshipType) {
+        case 'parent':
+          return 'linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%)'; // Green for parents
+        case 'child':
+          return 'linear-gradient(135deg, #06b6d4 0%, #0891b2 50%, #0e7490 100%)'; // Cyan for children
+        case 'spouse':
+          return 'linear-gradient(135deg, #a855f7 0%, #9333ea 50%, #7e22ce 100%)'; // Purple for spouse
+        case 'sibling':
+          return 'linear-gradient(135deg, #f59e0b 0%, #d97706 50%, #b45309 100%)'; // Amber for siblings
+        default:
+          break;
+      }
+    }
     
     switch (person.gender) {
       case 'Male':
@@ -20,6 +36,23 @@ const PersonNode2D = memo(({ data }) => {
 
   const getBorderColor = () => {
     if (isSelected) return '#fbbf24';
+    
+    // Add colored borders for highlighted connections
+    if (isHighlighted && relationshipType) {
+      switch (relationshipType) {
+        case 'parent':
+          return '#10b981'; // Green border for parents
+        case 'child':
+          return '#06b6d4'; // Cyan border for children
+        case 'spouse':
+          return '#a855f7'; // Purple border for spouse
+        case 'sibling':
+          return '#f59e0b'; // Amber border for siblings
+        default:
+          return 'transparent';
+      }
+    }
+    
     return 'transparent';
   };
 
@@ -60,6 +93,14 @@ const PersonNode2D = memo(({ data }) => {
         color: 'white',
         boxShadow: isSelected 
           ? '0 20px 60px rgba(251, 191, 36, 0.6), 0 0 0 4px rgba(251, 191, 36, 0.2)' 
+          : isHighlighted && relationshipType
+          ? relationshipType === 'parent' 
+            ? '0 15px 45px rgba(16, 185, 129, 0.5), 0 0 0 3px rgba(16, 185, 129, 0.3)'
+            : relationshipType === 'child'
+            ? '0 15px 45px rgba(6, 182, 212, 0.5), 0 0 0 3px rgba(6, 182, 212, 0.3)'
+            : relationshipType === 'spouse'
+            ? '0 15px 45px rgba(168, 85, 247, 0.5), 0 0 0 3px rgba(168, 85, 247, 0.3)'
+            : '0 15px 45px rgba(245, 158, 11, 0.5), 0 0 0 3px rgba(245, 158, 11, 0.3)'
           : isHovered
           ? '0 15px 45px rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(255, 255, 255, 0.1)'
           : '0 8px 25px rgba(0, 0, 0, 0.4)',
@@ -101,9 +142,11 @@ const PersonNode2D = memo(({ data }) => {
         position={Position.Top}
         style={{
           background: '#64748b',
-          width: '12px',
-          height: '12px',
-          border: '2px solid white',
+          width: '14px',
+          height: '14px',
+          border: '3px solid white',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+          zIndex: 10,
         }}
       />
 
@@ -273,9 +316,37 @@ const PersonNode2D = memo(({ data }) => {
           transform: isHovered ? 'scale(1.15) rotate(360deg)' : 'scale(1)',
           zIndex: 2,
         }}
+        title={`Parents: ${person.parents?.length || 0}, Children: ${person.children?.length || 0}, Spouses: ${person.spouses?.length || 0}, Siblings: ${person.siblings?.length || 0}`}
       >
-        {(person.parents?.length || 0) + (person.children?.length || 0) + (person.spouses?.length || 0)}
+        {(person.parents?.length || 0) + (person.children?.length || 0) + (person.spouses?.length || 0) + (person.siblings?.length || 0)}
       </div>
+      
+      {/* Detailed Relationship Info (shown on hover) */}
+      {isHovered && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '60px',
+            left: '12px',
+            background: 'rgba(0, 0, 0, 0.9)',
+            borderRadius: '12px',
+            padding: '8px 12px',
+            fontSize: '11px',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.6)',
+            zIndex: 3,
+            whiteSpace: 'nowrap',
+            animation: 'fadeIn 0.2s ease-in',
+          }}
+        >
+          <div style={{ fontWeight: 'bold', marginBottom: '4px', fontSize: '12px' }}>Relationships:</div>
+          <div>👨‍👩 Parents: {person.parents?.length || 0}</div>
+          <div>👶 Children: {person.children?.length || 0}</div>
+          <div>💑 Spouses: {person.spouses?.length || 0}</div>
+          <div>👥 Siblings: {person.siblings?.length || 0}</div>
+        </div>
+      )}
 
       {/* Bottom Handle for outgoing connections */}
       <Handle
@@ -283,9 +354,43 @@ const PersonNode2D = memo(({ data }) => {
         position={Position.Bottom}
         style={{
           background: '#64748b',
-          width: '12px',
-          height: '12px',
-          border: '2px solid white',
+          width: '14px',
+          height: '14px',
+          border: '3px solid white',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+          zIndex: 10,
+        }}
+      />
+      
+      {/* Left Handle for spouse connections */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="spouse-left"
+        style={{
+          background: '#a855f7',
+          width: '14px',
+          height: '14px',
+          border: '3px solid white',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+          top: '50%',
+          zIndex: 10,
+        }}
+      />
+      
+      {/* Right Handle for spouse connections */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="spouse-right"
+        style={{
+          background: '#a855f7',
+          width: '14px',
+          height: '14px',
+          border: '3px solid white',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+          top: '50%',
+          zIndex: 10,
         }}
       />
     </div>

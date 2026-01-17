@@ -23,6 +23,11 @@ function FamilyTree2D({ persons, selectedPerson, onPersonSelect, viewMode }) {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [timeScale, setTimeScale] = useState(null);
   const [generationBands, setGenerationBands] = useState([]);
+  const [highlightedConnections, setHighlightedConnections] = useState({
+    nodes: new Set(),
+    edges: new Set(),
+    relationshipTypes: {}
+  });
 
   // Convert persons data to nodes and edges
   useEffect(() => {
@@ -39,7 +44,7 @@ function FamilyTree2D({ persons, selectedPerson, onPersonSelect, viewMode }) {
     setTimeScale(calcTimeScale);
     setGenerationBands(calcBands);
 
-    // Create nodes
+    // Create nodes with highlight information
     const flowNodes = layoutNodes.map((person) => ({
       id: person.id,
       type: 'person',
@@ -48,8 +53,12 @@ function FamilyTree2D({ persons, selectedPerson, onPersonSelect, viewMode }) {
         person: person,
         isSelected: selectedPerson === person.id,
         onSelect: () => onPersonSelect(person.id),
+        isHighlighted: highlightedConnections.nodes.has(person.id),
+        relationshipType: highlightedConnections.relationshipTypes[person.id],
       },
-      draggable: true,
+      draggable: false, // Make cards static
+      selectable: true,
+      connectable: false,
     }));
 
     // Create edges with improved routing and styling
@@ -57,49 +66,90 @@ function FamilyTree2D({ persons, selectedPerson, onPersonSelect, viewMode }) {
       const sourcePerson = persons.find(p => p.id === edge.source);
       const targetPerson = persons.find(p => p.id === edge.target);
       
+      // Check if this edge is highlighted
+      const edgeKey = `${edge.source}-${edge.target}`;
+      const isEdgeHighlighted = highlightedConnections.edges.has(edgeKey);
+      
       let relationLabel = '';
       let labelBg = 'rgba(0, 0, 0, 0.7)';
       let edgeColor = '#3b82f6';
       let strokeWidth = 3;
       let edgeType = 'smoothstep';
       
-      if (edge.type === 'spouse') {
+      if (edge.type === 'sibling') {
+        relationLabel = '👥 Siblings';
+        edgeColor = isEdgeHighlighted ? '#f59e0b' : '#f59e0b';
+        labelBg = 'rgba(245, 158, 11, 0.9)';
+        strokeWidth = isEdgeHighlighted ? 5 : 3;
+        edgeType = 'straight'; // Straight line for sibling connections
+      } else if (edge.type === 'spouse') {
         relationLabel = '💑 Married';
-        edgeColor = '#a855f7';
+        edgeColor = isEdgeHighlighted ? '#a855f7' : '#a855f7';
         labelBg = 'rgba(168, 85, 247, 0.9)';
-        strokeWidth = 4;
+        strokeWidth = isEdgeHighlighted ? 5 : 4;
         edgeType = 'straight'; // Straight line for spouse connections
       } else {
-        // Parent-child relationship - use step edge for cleaner routing
+        // Parent-child relationship - use smoothstep for better curved routing
         const genDiff = targetPerson?.generation - sourcePerson?.generation;
+        
+        // Determine highlight color based on relationship type
+        if (isEdgeHighlighted) {
+          // If source is selected, target is child (cyan)
+          // If target is selected, source is parent (green)
+          if (highlightedConnections.relationshipTypes[edge.target] === 'child') {
+            edgeColor = '#06b6d4'; // Cyan for child connections
+            labelBg = 'rgba(6, 182, 212, 0.9)';
+          } else if (highlightedConnections.relationshipTypes[edge.source] === 'parent') {
+            edgeColor = '#10b981'; // Green for parent connections
+            labelBg = 'rgba(16, 185, 129, 0.9)';
+          } else {
+            edgeColor = '#3b82f6'; // Default blue
+            labelBg = 'rgba(59, 130, 246, 0.9)';
+          }
+          strokeWidth = 5; // Thicker when highlighted
+        } else {
+          // Default colors when not highlighted
+          if (genDiff === 1) {
+            edgeColor = '#3b82f6';
+            labelBg = 'rgba(59, 130, 246, 0.9)';
+          } else if (genDiff === 2) {
+            edgeColor = '#10b981';
+            labelBg = 'rgba(16, 185, 129, 0.9)';
+          } else {
+            edgeColor = '#6366f1';
+            labelBg = 'rgba(99, 102, 241, 0.9)';
+          }
+          strokeWidth = 3;
+        }
+        
         if (genDiff === 1) {
           relationLabel = '👨‍👧 Parent → Child';
-          edgeColor = '#3b82f6';
-          labelBg = 'rgba(59, 130, 246, 0.9)';
         } else if (genDiff === 2) {
           relationLabel = '👴 Grandparent → Grandchild';
-          edgeColor = '#10b981';
-          labelBg = 'rgba(16, 185, 129, 0.9)';
         } else {
           relationLabel = '👪 Family';
-          edgeColor = '#6366f1';
-          labelBg = 'rgba(99, 102, 241, 0.9)';
         }
-        edgeType = 'step'; // Step edge for better vertical-then-horizontal routing
+        
+        edgeType = 'smoothstep'; // Use smoothstep for smooth curved routing
       }
       
-      return {
+      // Configure handles for spouse connections
+      const edgeConfig = {
         id: `edge-${index}`,
         source: edge.source,
         target: edge.target,
         type: edgeType,
-        animated: edge.type !== 'spouse',
+        animated: isEdgeHighlighted || edge.type !== 'spouse', // Animate highlighted edges
         style: {
           stroke: edgeColor,
           strokeWidth: strokeWidth,
           strokeDasharray: edge.type === 'spouse' ? '8, 8' : '0',
           strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+          opacity: isEdgeHighlighted ? 1 : (selectedPerson ? 0.3 : 1), // Fade non-highlighted edges
+          transition: 'all 0.3s ease',
         },
+        zIndex: isEdgeHighlighted ? 10 : 1, // Highlighted edges on top
         markerEnd: edge.type === 'spouse' ? undefined : {
           type: MarkerType.ArrowClosed,
           color: edgeColor,
@@ -119,19 +169,22 @@ function FamilyTree2D({ persons, selectedPerson, onPersonSelect, viewMode }) {
         },
         labelBgPadding: [6, 10],
         labelBgBorderRadius: 6,
-        // Improve edge path routing
-        pathOptions: { 
-          offset: 20,
-          borderRadius: 12,
-        },
       };
+      
+      // Use side handles for spouse connections for better horizontal alignment
+      if (edge.type === 'spouse') {
+        edgeConfig.sourceHandle = 'spouse-right';
+        edgeConfig.targetHandle = 'spouse-left';
+      }
+      
+      return edgeConfig;
     });
 
     setNodes(flowNodes);
     setEdges(flowEdges);
   }, [persons, selectedPerson, onPersonSelect, setNodes, setEdges]);
 
-  // Update selected person
+  // Update selected person and highlighted connections
   useEffect(() => {
     setNodes((nds) =>
       nds.map((node) => ({
@@ -139,10 +192,75 @@ function FamilyTree2D({ persons, selectedPerson, onPersonSelect, viewMode }) {
         data: {
           ...node.data,
           isSelected: selectedPerson === node.id,
+          isHighlighted: highlightedConnections.nodes.has(node.id),
+          relationshipType: highlightedConnections.relationshipTypes[node.id],
         },
       }))
     );
-  }, [selectedPerson, setNodes]);
+  }, [selectedPerson, highlightedConnections, setNodes]);
+
+  // Calculate highlighted connections when a person is selected
+  useEffect(() => {
+    if (!selectedPerson || !persons || persons.length === 0) {
+      setHighlightedConnections({ nodes: new Set(), edges: new Set(), relationshipTypes: {} });
+      return;
+    }
+
+    const person = persons.find(p => p.id === selectedPerson);
+    if (!person) return;
+
+    const highlightedNodes = new Set([selectedPerson]);
+    const highlightedEdges = new Set();
+    const relationshipTypes = {};
+
+    // Add parents and their connections
+    if (person.parents) {
+      person.parents.forEach(parent => {
+        const parentId = parent.id || parent;
+        highlightedNodes.add(parentId);
+        relationshipTypes[parentId] = 'parent';
+        // Mark edge for highlighting
+        highlightedEdges.add(`${parentId}-${selectedPerson}`);
+      });
+    }
+
+    // Add children and their connections
+    if (person.children) {
+      person.children.forEach(child => {
+        const childId = child.id || child;
+        highlightedNodes.add(childId);
+        relationshipTypes[childId] = 'child';
+        // Mark edge for highlighting
+        highlightedEdges.add(`${selectedPerson}-${childId}`);
+      });
+    }
+
+    // Add spouses and their connections
+    if (person.spouses) {
+      person.spouses.forEach(spouse => {
+        const spouseId = spouse.id || spouse;
+        highlightedNodes.add(spouseId);
+        relationshipTypes[spouseId] = 'spouse';
+        // Mark edge for highlighting (bidirectional for spouse)
+        highlightedEdges.add(`${selectedPerson}-${spouseId}`);
+        highlightedEdges.add(`${spouseId}-${selectedPerson}`);
+      });
+    }
+
+    // Add siblings and their connections
+    if (person.siblings) {
+      person.siblings.forEach(sibling => {
+        const siblingId = sibling.id || sibling;
+        highlightedNodes.add(siblingId);
+        relationshipTypes[siblingId] = 'sibling';
+        // Sibling edges are through parents, so mark parent-sibling connections
+        highlightedEdges.add(`${siblingId}-${selectedPerson}`);
+        highlightedEdges.add(`${selectedPerson}-${siblingId}`);
+      });
+    }
+
+    setHighlightedConnections({ nodes: highlightedNodes, edges: highlightedEdges, relationshipTypes });
+  }, [selectedPerson, persons]);
 
   const onNodeClick = useCallback(
     (event, node) => {
@@ -162,6 +280,9 @@ function FamilyTree2D({ persons, selectedPerson, onPersonSelect, viewMode }) {
         onEdgesChange={onEdgesChange}
         onNodeClick={onNodeClick}
         nodeTypes={nodeTypes}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable={true}
         fitView
         fitViewOptions={{
           padding: 0.3,
@@ -250,6 +371,29 @@ function FamilyTree2D({ persons, selectedPerson, onPersonSelect, viewMode }) {
             <div style={{ marginBottom: '4px', fontSize: '12px' }}>💑 Spouse (dashed)</div>
             <div style={{ fontSize: '12px' }}>→ Parent-Child</div>
           </div>
+          {selectedPerson && (
+            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #475569' }}>
+              <div style={{ marginBottom: '6px', fontSize: '12px', fontWeight: 'bold' }}>
+                <span style={{ opacity: 0.8 }}>Click Highlight:</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', fontSize: '11px' }}>
+                <div style={{ width: '16px', height: '16px', background: '#10b981', borderRadius: '3px' }}></div>
+                <span>Parents</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', fontSize: '11px' }}>
+                <div style={{ width: '16px', height: '16px', background: '#06b6d4', borderRadius: '3px' }}></div>
+                <span>Children</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', fontSize: '11px' }}>
+                <div style={{ width: '16px', height: '16px', background: '#a855f7', borderRadius: '3px' }}></div>
+                <span>Spouse</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px' }}>
+                <div style={{ width: '16px', height: '16px', background: '#f59e0b', borderRadius: '3px' }}></div>
+                <span>Siblings</span>
+              </div>
+            </div>
+          )}
         </Panel>
         
         {/* Info Panel */}
