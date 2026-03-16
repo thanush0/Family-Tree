@@ -10,9 +10,9 @@ export class LayoutEngine {
     this.positions = new Map();
     this.generations = new Map();
     this.spacing = {
-      horizontal: 5,
-      vertical: 6,
-      depth: 8
+      horizontal: 8,  // Increased for better visibility
+      vertical: 5,    // Better vertical spacing
+      depth: 0        // Flatten Z-axis for clarity
     };
   }
 
@@ -46,6 +46,7 @@ export class LayoutEngine {
 
   /**
    * Position nodes in a specific generation
+   * Y axis is inverted (higher generation = lower Y)
    */
   positionGeneration(generation, nodes) {
     const count = nodes.length;
@@ -54,7 +55,7 @@ export class LayoutEngine {
 
     nodes.forEach((node, index) => {
       const x = startX + (index * this.spacing.horizontal);
-      const y = generation * this.spacing.vertical;
+      const y = -generation * this.spacing.vertical; // Negative for top-to-bottom view
       const z = 0;
 
       this.positions.set(node.id, { x, y, z });
@@ -131,14 +132,15 @@ export class LayoutEngine {
 
   /**
    * Position a single family group
+   * Improved spacing for 3D view
    */
   positionFamily(family, startX, generationYPositions) {
     const { parents, children } = family;
     
-    // Position parents side by side
+    // Position parents side by side with better spacing
     parents.forEach((parent, index) => {
-      const x = startX + (index * this.spacing.horizontal * 0.5);
-      const y = parent.generation * this.spacing.vertical;
+      const x = startX + (index * this.spacing.horizontal * 0.7); // Closer together
+      const y = -parent.generation * this.spacing.vertical; // Negative for top-to-bottom
       
       this.positions.set(parent.id, { x, y, z: 0 });
       
@@ -147,14 +149,15 @@ export class LayoutEngine {
       }
     });
 
-    // Position children below parents
+    // Position children below parents with better spread
     const childrenCount = children.length;
     const childrenWidth = (childrenCount - 1) * this.spacing.horizontal;
-    const childrenStartX = startX - childrenWidth / 2;
+    const parentsCenterX = startX + (parents.length > 1 ? this.spacing.horizontal * 0.35 : 0);
+    const childrenStartX = parentsCenterX - childrenWidth / 2;
 
     children.forEach((child, index) => {
       const x = childrenStartX + (index * this.spacing.horizontal);
-      const y = child.generation * this.spacing.vertical;
+      const y = -child.generation * this.spacing.vertical; // Negative for top-to-bottom
       
       this.positions.set(child.id, { x, y, z: 0 });
       
@@ -163,7 +166,7 @@ export class LayoutEngine {
       }
     });
 
-    return Math.max(this.spacing.horizontal * 2, childrenWidth);
+    return Math.max(this.spacing.horizontal * 2.5, childrenWidth + this.spacing.horizontal);
   }
 
   /**
@@ -177,7 +180,7 @@ export class LayoutEngine {
       .forEach((node, index) => {
         const x = startX + (index * this.spacing.horizontal);
         const y = generationYPositions.get(node.generation) || 
-                  (node.generation * this.spacing.vertical);
+                  (-node.generation * this.spacing.vertical); // Negative for top-to-bottom
         
         this.positions.set(node.id, { x, y, z: 0 });
       });

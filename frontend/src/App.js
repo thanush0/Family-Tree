@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import FamilyTree2D from './components/FamilyTree2D';
+import Scene3D from './components/Scene3D';
+import Scene3DTemporal from './components/Scene3DTemporal';
 import Sidebar from './components/Sidebar';
 import Controls from './components/Controls';
 import PersonForm from './components/PersonForm';
@@ -12,6 +14,7 @@ function App() {
   const [showForm, setShowForm] = useState(false);
   const [editingPerson, setEditingPerson] = useState(null);
   const [viewMode, setViewMode] = useState('full'); // 'full', 'ancestors', 'descendants'
+  const [visualMode, setVisualMode] = useState('3d-temporal'); // '2d', '3d', or '3d-temporal'
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -130,13 +133,29 @@ function App() {
 
   return (
     <div className="App">
-      {/* 2D Family Tree */}
-      <FamilyTree2D 
-        persons={persons}
-        selectedPerson={selectedPerson?.id}
-        onPersonSelect={handlePersonSelect}
-        viewMode={viewMode}
-      />
+      {/* 3D Temporal, 3D, or 2D Family Tree */}
+      {visualMode === '3d-temporal' ? (
+        <Scene3DTemporal 
+          persons={persons}
+          selectedPerson={selectedPerson}
+          onPersonSelect={handlePersonSelect}
+          viewMode={viewMode}
+        />
+      ) : visualMode === '3d' ? (
+        <Scene3D 
+          persons={persons}
+          selectedPerson={selectedPerson}
+          onPersonSelect={handlePersonSelect}
+          viewMode={viewMode}
+        />
+      ) : (
+        <FamilyTree2D 
+          persons={persons}
+          selectedPerson={selectedPerson?.id}
+          onPersonSelect={handlePersonSelect}
+          viewMode={viewMode}
+        />
+      )}
 
       {/* Top Controls */}
       <Controls 
@@ -144,6 +163,8 @@ function App() {
         onSearch={handleSearch}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
+        visualMode={visualMode}
+        onVisualModeChange={setVisualMode}
       />
 
       {/* Right Sidebar */}
